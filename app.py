@@ -2,122 +2,70 @@ import streamlit as st
 from ultralytics import YOLO
 import cv2
 import tempfile
-from collections import Counter
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image
 import numpy as np
-import os
 
 # Load YOLOv8 model
-model = YOLO("best.pt")
+model = YOLO("best.pt")  # Make sure this is the correct path
 
-# Set page layout and background
 st.set_page_config(page_title="Waterborne Bird Detection System", layout="wide")
+
+# Page header
 st.markdown("""
-    <style>
-    body {
-        background: linear-gradient(to right, #0575E6, #00F260);
-        color: white;
-    }
-    .main {
-        background-color: transparent;
-    }
-    h1 {
-        text-align: center;
-        color: white;
-        font-size: 3em;
-        margin-bottom: 0;
-    }
-    .subheader {
-        text-align: center;
-        font-size: 1.2em;
-        color: #e0e0e0;
-        margin-bottom: 30px;
-    }
-    .upload-box {
-        background-color: white;
-        padding: 20px;
-        border-radius: 15px;
-        text-align: center;
-        color: black;
-        margin: auto;
-        width: 50%;
-    }
-    .tag {
-        background-color: #A020F0;
-        color: white;
-        padding: 4px 8px;
-        font-weight: bold;
-        border-radius: 8px;
-        font-size: 18px;
-        display: inline-block;
-        margin-bottom: 10px;
-    }
-    .species-card {
-        background-color: #f0f8ff;
-        color: #013A63;
-        padding: 20px;
-        border-radius: 15px;
-        font-size: 16px;
-        width: 70%;
-        margin: 20px auto;
-    }
-    </style>
+    <div style='text-align: center; padding: 20px; background: linear-gradient(to right, #0A81D1, #00B4DB); border-radius: 20px; color: white;'>
+        <h1 style='margin-bottom: 0;'>🦆 Waterborne Bird Detection System</h1>
+        <p style='font-size: 18px;'>Upload an image of a bird, and the system will detect and name the bird species.</p>
+    </div>
 """, unsafe_allow_html=True)
 
-st.markdown("<h1>Waterborne Bird Detection System</h1>", unsafe_allow_html=True)
-st.markdown("<p class='subheader'>Upload an image of a bird, and the system will detect and name the bird species.</p>", unsafe_allow_html=True)
-
-# Upload Section
-st.markdown("<div class='upload-box'>", unsafe_allow_html=True)
-uploaded_file = st.file_uploader("Upload an image or video", type=["jpg", "jpeg", "png", "mp4", "avi"])
+uploaded_file = st.file_uploader("Upload an image or a video", type=["jpg", "jpeg", "png", "mp4", "avi", "mov"])
 detect_button = st.button("Detect Bird")
-st.markdown("</div>", unsafe_allow_html=True)
 
-# Clear button
-if st.button("Clear"):
-    st.experimental_rerun()
+if detect_button and uploaded_file is not None:
+    file_type = uploaded_file.type
 
-# Detect logic
-if uploaded_file and detect_button:
-    with tempfile.NamedTemporaryFile(delete=False) as tmp:
-        tmp.write(uploaded_file.read())
-        tmp_path = tmp.name
+    # Save file temporarily
+    tfile = tempfile.NamedTemporaryFile(delete=False)
+    tfile.write(uploaded_file.read())
 
-    if "image" in uploaded_file.type:
-        image = Image.open(tmp_path).convert("RGB")
-        image_np = np.array(image)
-        results = model.predict(source=image_np, conf=0.3)
-        boxes = results[0].boxes
+    if "image" in file_type:
+        image = cv2.imread(tfile.name)
+        results = model(image)
 
-        if boxes and len(boxes.cls) > 0:
-            names = results[0].names
-            cls_id = int(boxes.cls[0].item())
-            label = names[cls_id]
-            conf = float(boxes.conf[0].item()) * 100
+        # Check for detection
+        if results[0].boxes and len(results[0].boxes.cls) > 0:
+            boxes = results[0].boxes
+            top_idx = boxes.conf.argmax()
+            cls_id = int(boxes.cls[top_idx])
+            confidence = float(boxes.conf[top_idx])
+            xyxy = boxes.xyxy[top_idx].cpu().numpy().astype(int)
+
+            # ✅ Get class name from model directly
+            class_name = model.names[cls_id]
 
             # Draw bounding box and label
-            draw = ImageDraw.Draw(image)
-            xyxy = boxes.xyxy[0].tolist()
-            draw.rectangle(xyxy, outline="magenta", width=3)
+            label = f"{class_name} ({confidence:.2f})"
+            color = (255, 0, 255)
+            cv2.rectangle(image, tuple(xyxy[:2]), tuple(xyxy[2:]), color, 3)
+            cv2.putText(image, class_name, (xyxy[0], xyxy[1] - 10),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
 
-            # Label text background
-            font = ImageFont.load_default()
-            draw.rectangle([xyxy[0], xyxy[1] - 20, xyxy[0] + 160, xyxy[1]], fill="magenta")
-            draw.text((xyxy[0] + 5, xyxy[1] - 18), label, fill="white", font=font)
-
-            st.image(image, caption="", use_container_width=True)
-
-            # Stylish tag and species info card
-            st.markdown(f"<div class='tag'>{label}</div>", unsafe_allow_html=True)
+            # Display result
+            st.image(image, caption="Detected Bird", channels="BGR", use_container_width=True)
 
             st.markdown(f"""
-                <div class='species-card'>
-                    <h2>{label}</h2>
-                    <i><b>Scientific name:</b> Unknown (add if available)</i>
-                    <p>The <strong>{label}</strong> is a water bird species. Description is unavailable here, but you can enrich this card with actual bird info later.</p>
+                <div style='margin-top: 20px; padding: 20px; background-color: #f0f8ff; border-radius: 10px;'>
+                    <h3 style='color: #0A81D1;'>{class_name}</h3>
+                    <p style='font-style: italic;'>Confidence: {confidence:.2f}</p>
+                    <p><b>Total birds detected:</b> 1</p>
+                    <p><b>Birds identified:</b> 1x {class_name}</p>
                 </div>
             """, unsafe_allow_html=True)
         else:
-            st.warning("No birds detected.")
+            st.warning("⚠️ No birds detected. Try another image.")
+
+    elif "video" in file_type:
+        st.warning("Video detection is not implemented in this version.")
     else:
-        st.warning("Please upload an image. Video handling is not yet styled.")
+        st.error("Unsupported file type.")
+
