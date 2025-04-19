@@ -1,26 +1,26 @@
 import streamlit as st
 from ultralytics import YOLO
-import cv2
-import tempfile
-from collections import Counter
 from PIL import Image
 import numpy as np
+import tempfile
+import cv2
+from collections import Counter
 
-# Load YOLOv8 model (assumes best.pt is in the same folder or correct path)
+# Load model once
 model = YOLO("best.pt")
 
-# Get class names directly from the model
-CLASS_NAMES = model.names
+st.set_page_config(page_title="Water Bird Detection", layout="wide")
 
-st.set_page_config(page_title="Water Bird Detection System", layout="wide")
-
+# Title
 st.markdown("""
     <h1 style='text-align: center; color: #0A81D1;'>🦆 Water Bird Detection System</h1>
-    <p style='text-align: center;'>Upload an image or a video to identify water birds using AI.</p>
+    <p style='text-align: center;'>Upload an image or video to detect water birds.</p>
 """, unsafe_allow_html=True)
 
-uploaded_file = st.file_uploader("Upload an Image or Video", type=["jpg", "jpeg", "png", "mp4", "avi", "mpeg"])
+# Upload
+uploaded_file = st.file_uploader("Upload an Image or Video", type=["jpg", "jpeg", "png", "mp4", "avi"])
 
+# Buttons
 detect_button = st.button("Detect")
 clear_button = st.button("Clear")
 
@@ -28,68 +28,72 @@ if clear_button:
     st.experimental_rerun()
 
 if uploaded_file and detect_button:
+    # Save file temporarily
+    with tempfile.NamedTemporaryFile(delete=False) as tmp:
+        tmp.write(uploaded_file.read())
+        temp_path = tmp.name
+
     file_type = uploaded_file.type
 
-    with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
-        tmp_file.write(uploaded_file.read())
-        tmp_path = tmp_file.name
-
     if "image" in file_type:
-        image = Image.open(tmp_path).convert("RGB")
+        # Show uploaded image
+        image = Image.open(temp_path).convert("RGB")
         st.subheader("📤 Uploaded Image")
-        st.image(image, caption="Uploaded Image", use_container_width=True)
+        st.image(image, use_container_width=True)
 
-        np_image = np.array(image)
-        results = model.predict(source=np_image, conf=0.25)
-
+        # Predict
+        results = model.predict(np.array(image), conf=0.25)
         boxes = results[0].boxes
-        if boxes and len(boxes.cls) > 0:
-            result_img = results[0].plot()
 
+        if boxes and len(boxes.cls) > 0:
+            # Plot and display
+            result_img = results[0].plot()
             class_ids = boxes.cls.tolist()
-            labels = [CLASS_NAMES[int(cls_id)] for cls_id in class_ids]
+            names = model.names
+            labels = [names[int(id)] for id in class_ids]
             label_counts = Counter(labels)
-            summary = ', '.join(f"{count}x {label}" for label, count in label_counts.items())
+            summary = ', '.join(f"{v}x {k}" for k, v in label_counts.items())
 
             st.subheader("✅ Detection Result")
             st.image(result_img, caption="Detected Image", use_container_width=True)
-            st.success(f"✅ Total birds detected: {len(class_ids)}")
+            st.success(f"Total birds detected: {len(class_ids)}")
             st.info(f"Birds identified: {summary}")
         else:
-            st.warning("❌ No birds detected in the image.")
+            st.warning("❌ No birds detected in this image.")
 
     elif "video" in file_type:
         st.info("🔄 Processing video... Please wait.")
-        cap = cv2.VideoCapture(tmp_path)
+
+        cap = cv2.VideoCapture(temp_path)
         frame_count = 0
         detections = []
-        preview_frame = None
+        preview = None
 
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
                 break
-
             if frame_count % 15 == 0:
-                results = model.predict(source=frame, conf=0.25)
+                results = model.predict(frame, conf=0.25)
                 boxes = results[0].boxes
-                class_ids = boxes.cls.tolist()
-                labels = [CLASS_NAMES[int(cls_id)] for cls_id in class_ids]
-                detections.extend(labels)
-
-                if preview_frame is None and len(labels) > 0:
-                    preview_frame = results[0].plot()
-
+                if boxes and len(boxes.cls) > 0:
+                    if preview is None:
+                        preview = results[0].plot()
+                    class_ids = boxes.cls.tolist()
+                    names = model.names
+                    labels = [names[int(id)] for id in class_ids]
+                    detections.extend(labels)
             frame_count += 1
         cap.release()
 
         if detections:
             label_counts = Counter(detections)
-            summary = ', '.join(f"{count}x {label}" for label, count in label_counts.items())
-            st.subheader("✅ Detection Summary")
-            if preview_frame is not None:
-                st.image(preview_frame, caption="Sample Detection Frame", use_container_width=True)
-            st.success(f"✅ Total birds detected: {len(detections)}")
+            summary = ', '.join(f"{v}x {k}" for k, v in label_counts.items())
+            st.subheader("🎥 Detection Summary")
+            if preview is not None:
+                st.image(preview, caption="Sample Frame", use_container_width=True)
+            st.success(f"Total birds detected: {len(detections)}")
             st.info(f"Birds identified: {summary}")
         else:
-            st.warning("❌ No birds detected in the video.")
+            st.warning("❌ No birds detected in this video.")
+
