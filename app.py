@@ -7,7 +7,11 @@ from PIL import Image
 import numpy as np
 
 # Load YOLOv8 model
-model = YOLO("best.pt")
+model = YOLO("best.pt")  # Update path if in a subfolder
+
+# Optional: custom class name list (if needed)
+# with open("class_names.txt") as f:
+#     class_names = [line.strip() for line in f]
 
 st.set_page_config(page_title="Water Bird Detection System", layout="wide")
 
@@ -32,13 +36,20 @@ if uploaded_file and detect_button:
         tmp_path = tmp_file.name
 
     if "image" in file_type:
-        image = Image.open(tmp_path).convert("RGB")
-        results = model.predict(source=np.array(image), conf=0.25)
+        image = Image.open(tmp_path).convert("RGB").resize((640, 640))
+        results = model.predict(source=np.array(image), conf=0.1)
         boxes = results[0].boxes
-        names = results[0].names
-        class_ids = boxes.cls.tolist()
 
-        if class_ids:
+        # Debug output
+        st.write("🔍 Detection Boxes:", boxes)
+
+        try:
+            names = results[0].names
+        except:
+            names = model.names  # fallback
+
+        if boxes and boxes.cls.numel() > 0:
+            class_ids = boxes.cls.tolist()
             labels = [names[int(cls_id)] for cls_id in class_ids]
             label_counts = Counter(labels)
             summary = ', '.join(f"{count}x {label}" for label, count in label_counts.items())
@@ -47,7 +58,7 @@ if uploaded_file and detect_button:
             st.success(f"✅ Total birds detected: {len(class_ids)}")
             st.info(f"Birds identified: {summary}")
         else:
-            st.warning("No birds detected.")
+            st.warning("⚠️ No birds detected.")
 
     elif "video" in file_type:
         cap = cv2.VideoCapture(tmp_path)
@@ -59,13 +70,20 @@ if uploaded_file and detect_button:
             if not ret:
                 break
 
-            if frame_count % 15 == 0:  # process every 15th frame
-                results = model.predict(source=frame, conf=0.25)
+            if frame_count % 15 == 0:  # Process every 15th frame
+                resized_frame = cv2.resize(frame, (640, 640))
+                results = model.predict(source=resized_frame, conf=0.1)
                 boxes = results[0].boxes
-                names = results[0].names
-                class_ids = boxes.cls.tolist()
-                labels = [names[int(cls_id)] for cls_id in class_ids]
-                detections.extend(labels)
+
+                try:
+                    names = results[0].names
+                except:
+                    names = model.names
+
+                if boxes and boxes.cls.numel() > 0:
+                    class_ids = boxes.cls.tolist()
+                    labels = [names[int(cls_id)] for cls_id in class_ids]
+                    detections.extend(labels)
 
             frame_count += 1
         cap.release()
@@ -76,4 +94,4 @@ if uploaded_file and detect_button:
             st.success(f"✅ Total birds detected: {len(detections)}")
             st.info(f"Birds identified: {summary}")
         else:
-            st.warning("No birds detected.")
+            st.warning("⚠️ No birds detected.")
