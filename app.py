@@ -6,8 +6,11 @@ from collections import Counter
 from PIL import Image
 import numpy as np
 
-# Load YOLOv8 model
+# Load YOLOv8 model (assumes best.pt is in the same folder or correct path)
 model = YOLO("best.pt")
+
+# Get class names directly from the model
+CLASS_NAMES = model.names
 
 st.set_page_config(page_title="Water Bird Detection System", layout="wide")
 
@@ -36,7 +39,6 @@ if uploaded_file and detect_button:
         st.subheader("📤 Uploaded Image")
         st.image(image, caption="Uploaded Image", use_container_width=True)
 
-        # Convert to NumPy for YOLO
         np_image = np.array(image)
         results = model.predict(source=np_image, conf=0.25)
 
@@ -45,8 +47,7 @@ if uploaded_file and detect_button:
             result_img = results[0].plot()
 
             class_ids = boxes.cls.tolist()
-            names = results[0].names
-            labels = [names[int(cls_id)] for cls_id in class_ids]
+            labels = [CLASS_NAMES[int(cls_id)] for cls_id in class_ids]
             label_counts = Counter(labels)
             summary = ', '.join(f"{count}x {label}" for label, count in label_counts.items())
 
@@ -72,9 +73,8 @@ if uploaded_file and detect_button:
             if frame_count % 15 == 0:
                 results = model.predict(source=frame, conf=0.25)
                 boxes = results[0].boxes
-                names = results[0].names
                 class_ids = boxes.cls.tolist()
-                labels = [names[int(cls_id)] for cls_id in class_ids]
+                labels = [CLASS_NAMES[int(cls_id)] for cls_id in class_ids]
                 detections.extend(labels)
 
                 if preview_frame is None and len(labels) > 0:
