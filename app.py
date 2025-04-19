@@ -2,70 +2,94 @@ import streamlit as st
 from ultralytics import YOLO
 import cv2
 import tempfile
+from collections import Counter
 from PIL import Image
 import numpy as np
 
 # Load YOLOv8 model
-model = YOLO("best.pt")  # Make sure this is the correct path
+model = YOLO("best.pt")
 
-st.set_page_config(page_title="Waterborne Bird Detection System", layout="wide")
+st.set_page_config(page_title="Water Bird Detection System", layout="wide")
 
-# Page header
 st.markdown("""
-    <div style='text-align: center; padding: 20px; background: linear-gradient(to right, #0A81D1, #00B4DB); border-radius: 20px; color: white;'>
-        <h1 style='margin-bottom: 0;'>🦆 Waterborne Bird Detection System</h1>
-        <p style='font-size: 18px;'>Upload an image of a bird, and the system will detect and name the bird species.</p>
-    </div>
+    <h1 style='text-align: center; color: #0A81D1;'>🦆 Water Bird Detection System</h1>
+    <p style='text-align: center;'>Upload an image or a video to identify water birds using AI.</p>
 """, unsafe_allow_html=True)
 
-uploaded_file = st.file_uploader("Upload an image or a video", type=["jpg", "jpeg", "png", "mp4", "avi", "mov"])
-detect_button = st.button("Detect Bird")
+uploaded_file = st.file_uploader("Upload an Image or Video", type=["jpg", "jpeg", "png", "mp4", "avi", "mpeg"])
 
-if detect_button and uploaded_file is not None:
+detect_button = st.button("Detect")
+clear_button = st.button("Clear")
+
+if clear_button:
+    st.experimental_rerun()
+
+if uploaded_file and detect_button:
     file_type = uploaded_file.type
 
-    # Save file temporarily
-    tfile = tempfile.NamedTemporaryFile(delete=False)
-    tfile.write(uploaded_file.read())
+    with tempfile.NamedTemporaryFile(delete=False) as tmp_file:
+        tmp_file.write(uploaded_file.read())
+        tmp_path = tmp_file.name
 
     if "image" in file_type:
-        image = cv2.imread(tfile.name)
-        results = model(image)
+        image = Image.open(tmp_path).convert("RGB")
+        st.subheader("📤 Uploaded Image")
+        st.image(image, caption="Uploaded Image", use_container_width=True)
 
-        # Check for detection
-        if results[0].boxes and len(results[0].boxes.cls) > 0:
-            boxes = results[0].boxes
-            top_idx = boxes.conf.argmax()
-            cls_id = int(boxes.cls[top_idx])
-            confidence = float(boxes.conf[top_idx])
-            xyxy = boxes.xyxy[top_idx].cpu().numpy().astype(int)
+        # Convert to NumPy for YOLO
+        np_image = np.array(image)
+        results = model.predict(source=np_image, conf=0.25)
 
-            # ✅ Get class name from model directly
-            class_name = model.names[cls_id]
+        boxes = results[0].boxes
+        if boxes and len(boxes.cls) > 0:
+            result_img = results[0].plot()
 
-            # Draw bounding box and label
-            label = f"{class_name} ({confidence:.2f})"
-            color = (255, 0, 255)
-            cv2.rectangle(image, tuple(xyxy[:2]), tuple(xyxy[2:]), color, 3)
-            cv2.putText(image, class_name, (xyxy[0], xyxy[1] - 10),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
+            class_ids = boxes.cls.tolist()
+            names = results[0].names
+            labels = [names[int(cls_id)] for cls_id in class_ids]
+            label_counts = Counter(labels)
+            summary = ', '.join(f"{count}x {label}" for label, count in label_counts.items())
 
-            # Display result
-            st.image(image, caption="Detected Bird", channels="BGR", use_container_width=True)
-
-            st.markdown(f"""
-                <div style='margin-top: 20px; padding: 20px; background-color: #f0f8ff; border-radius: 10px;'>
-                    <h3 style='color: #0A81D1;'>{class_name}</h3>
-                    <p style='font-style: italic;'>Confidence: {confidence:.2f}</p>
-                    <p><b>Total birds detected:</b> 1</p>
-                    <p><b>Birds identified:</b> 1x {class_name}</p>
-                </div>
-            """, unsafe_allow_html=True)
+            st.subheader("✅ Detection Result")
+            st.image(result_img, caption="Detected Image", use_container_width=True)
+            st.success(f"✅ Total birds detected: {len(class_ids)}")
+            st.info(f"Birds identified: {summary}")
         else:
-            st.warning("⚠️ No birds detected. Try another image.")
+            st.warning("❌ No birds detected in the image.")
 
     elif "video" in file_type:
-        st.warning("Video detection is not implemented in this version.")
-    else:
-        st.error("Unsupported file type.")
+        st.info("🔄 Processing video... Please wait.")
+        cap = cv2.VideoCapture(tmp_path)
+        frame_count = 0
+        detections = []
+        preview_frame = None
 
+        while cap.isOpened():
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            if frame_count % 15 == 0:
+                results = model.predict(source=frame, conf=0.25)
+                boxes = results[0].boxes
+                names = results[0].names
+                class_ids = boxes.cls.tolist()
+                labels = [names[int(cls_id)] for cls_id in class_ids]
+                detections.extend(labels)
+
+                if preview_frame is None and len(labels) > 0:
+                    preview_frame = results[0].plot()
+
+            frame_count += 1
+        cap.release()
+
+        if detections:
+            label_counts = Counter(detections)
+            summary = ', '.join(f"{count}x {label}" for label, count in label_counts.items())
+            st.subheader("✅ Detection Summary")
+            if preview_frame is not None:
+                st.image(preview_frame, caption="Sample Detection Frame", use_container_width=True)
+            st.success(f"✅ Total birds detected: {len(detections)}")
+            st.info(f"Birds identified: {summary}")
+        else:
+            st.warning("❌ No birds detected in the video.")
